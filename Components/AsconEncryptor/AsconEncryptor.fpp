@@ -51,10 +51,11 @@ module Components {
 
 
     @ (Optional) If you need to pass data in/out as raw bytes
-    # async input port Encrypt_Input: Fw.Buffer
-    # output port Encrypt_Output: Fw.Buffer
-    # async input port Decrypt_Input: Fw.Buffer
-    # output port Decrypt_Output: Fw.Buffer
+    # async input port Encrypt_Input: Fw.BufferGet
+     output port EncryptedDataOut: Fw.BufferSend
+    # async input port Decrypt_Input: Fw.BufferGet
+    # output port Decrypt_Output: Fw.BufferSend
+
 
     #####################
     # Example placeholders

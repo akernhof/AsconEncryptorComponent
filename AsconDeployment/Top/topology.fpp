@@ -17,6 +17,7 @@ module AsconDeployment {
     # ----------------------------------------------------------------------
 
     instance asconEncryptor
+    instance wifiHandler
     instance $health
     instance blockDrv
     instance tlmSend
@@ -135,7 +136,7 @@ module AsconDeployment {
     }
 
     connections AsconDeployment {
-      # Add here connections to user-defined components
+      asconEncryptor.EncryptedDataOut -> wifiHandler.EncryptedDataIn
     }
 
   }

@@ -3,6 +3,8 @@
 #include <stdexcept>
 #include <vector>
 #include <cstdio>
+#include "Fw/Types/Assert.hpp"
+#include "Fw/Logger/Logger.hpp"
 
 // -------------------------------
 // ASCON HEADERS (C library)
@@ -165,6 +167,21 @@ namespace Components {
 
       ciphertext.resize(cLen);
 
+      Fw::Buffer outBuffer;
+      // NOTE: If ciphertext is a local variable, watch out for its lifetime.
+      // This example uses const_cast, which can be acceptable here if you're careful.
+      outBuffer.setData(const_cast<U8*>(ciphertext.data()));
+      outBuffer.setSize(ciphertext.size());
+
+      // Send via our new output port
+      if (this->isConnected_EncryptedDataOut_OutputPort(0)) {
+          this->EncryptedDataOut_out(0, outBuffer);
+      } else {
+          // Optionally log a warning if port is unconnected
+          Fw::LogStringArg msg("EncryptedDataOut not connected!");
+          this->log_ACTIVITY_HI_DebugLog(msg);
+      }
+      
       // DEBUG LOG ADDED (ciphertext length)      
       {
           char debugBuf[128];
@@ -316,6 +333,8 @@ namespace Components {
 
       // 6) Resize plaintext to actual length pLen
       plaintext.resize(pLen);
+
+
 
       // 7) Log the final plaintext length
       {
