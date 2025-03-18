@@ -105,7 +105,7 @@ namespace Components {
               "Encrypt: plaintext length: %zu", plaintext_len
           );
           Fw::LogStringArg dbg(debugBuf);
-          this->log_ACTIVITY_HI_DebugLog(dbg);
+          this->log_ACTIVITY_LO_DebugLog(dbg);
       }
 
       std::vector<uint8_t> plaintext(
@@ -123,7 +123,7 @@ namespace Components {
           std::snprintf(debugBuf, sizeof(debugBuf),
               "Encrypt start: %u sec, %u usec", start.getSeconds(), start.getUSeconds());
           Fw::LogStringArg dbg(debugBuf);
-          this->log_ACTIVITY_HI_DebugLog(dbg);
+          this->log_ACTIVITY_LO_DebugLog(dbg);
       }
 
       // 3) Perform Ascon AEAD encryption      
@@ -144,7 +144,7 @@ namespace Components {
           std::snprintf(debugBuf, sizeof(debugBuf),
               "Encrypt end: %u sec, %u usec", end.getSeconds(), end.getUSeconds());
           Fw::LogStringArg dbg(debugBuf);
-          this->log_ACTIVITY_HI_DebugLog(dbg);
+          this->log_ACTIVITY_LO_DebugLog(dbg);
       }
 
       if (ret != 0) {
@@ -162,24 +162,24 @@ namespace Components {
           std::snprintf(debugBuf, sizeof(debugBuf),
               "Encrypt completed in %u usec", m_encTimeUs);
           Fw::LogStringArg dbg(debugBuf);
-          this->log_ACTIVITY_HI_DebugLog(dbg);
+          this->log_ACTIVITY_LO_DebugLog(dbg);
       }
 
       ciphertext.resize(cLen);
 
+      // Fix: Create a buffer with a copy of the ciphertext
       Fw::Buffer outBuffer;
-      // NOTE: If ciphertext is a local variable, watch out for its lifetime.
-      // This example uses const_cast, which can be acceptable here if you're careful.
-      outBuffer.setData(const_cast<U8*>(ciphertext.data()));
-      outBuffer.setSize(ciphertext.size());
+      U8* bufferData = new U8[cLen]; // Allocate persistent memory
+      memcpy(bufferData, ciphertext.data(), cLen); // Copy the ciphertext
+      outBuffer.setData(bufferData);
+      outBuffer.setSize(cLen);
 
-      // Send via our new output port
       if (this->isConnected_EncryptedDataOut_OutputPort(0)) {
           this->EncryptedDataOut_out(0, outBuffer);
       } else {
-          // Optionally log a warning if port is unconnected
           Fw::LogStringArg msg("EncryptedDataOut not connected!");
-          this->log_ACTIVITY_HI_DebugLog(msg);
+          this->log_ACTIVITY_LO_DebugLog(msg);
+          delete[] bufferData; // Clean up if port isn’t connected
       }
       
       // DEBUG LOG ADDED (ciphertext length)      
@@ -188,7 +188,7 @@ namespace Components {
           std::snprintf(debugBuf, sizeof(debugBuf),
               "Encrypt: ciphertext length: %llu", cLen);
           Fw::LogStringArg dbg(debugBuf);
-          this->log_ACTIVITY_HI_DebugLog(dbg);
+          this->log_ACTIVITY_LO_DebugLog(dbg);
       }
 
       // 4) Convert ciphertext to hex for logging      
@@ -225,14 +225,14 @@ namespace Components {
               "Decrypt: raw input length=%zu, data='%.128s'",
               len, rawData);
           Fw::LogStringArg dbgArg(dbgBuf);
-          this->log_ACTIVITY_HI_DebugLog(dbgArg);
+          this->log_ACTIVITY_LO_DebugLog(dbgArg);
       }
 
       // 2) Convert the input to std::string, check length
       std::string cipherHex = data.toChar();
       if (cipherHex.size() > 1024) {
           Fw::LogStringArg dbgArg("Input exceeds 1024 chars");
-          this->log_ACTIVITY_HI_DebugLog(dbgArg);
+          this->log_ACTIVITY_LO_DebugLog(dbgArg);
           this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::VALIDATION_ERROR);
           return;
       }
@@ -242,7 +242,7 @@ namespace Components {
           std::snprintf(dbgBuf, sizeof(dbgBuf),
               "Hex input length: %zu", cipherHex.size());
           Fw::LogStringArg dbgArg(dbgBuf);
-          this->log_ACTIVITY_HI_DebugLog(dbgArg);
+          this->log_ACTIVITY_LO_DebugLog(dbgArg);
       }
 
       // 3) Attempt to parse hex -> bytes
@@ -255,7 +255,7 @@ namespace Components {
               std::snprintf(dbgBuf, sizeof(dbgBuf),
                   "hexToBytes() failed: %s", e.what());
               Fw::LogStringArg dbgArg(dbgBuf);
-              this->log_ACTIVITY_HI_DebugLog(dbgArg);
+              this->log_ACTIVITY_LO_DebugLog(dbgArg);
           }
           this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::VALIDATION_ERROR);
           return;
@@ -267,7 +267,7 @@ namespace Components {
           std::snprintf(dbgBuf, sizeof(dbgBuf),
               "cipherBytes length after parse: %zu", cipherBytes.size());
           Fw::LogStringArg dbgArg(dbgBuf);
-          this->log_ACTIVITY_HI_DebugLog(dbgArg);
+          this->log_ACTIVITY_LO_DebugLog(dbgArg);
       }
 
       // 4) Prepare plaintext buffer
@@ -281,7 +281,7 @@ namespace Components {
           std::snprintf(debugBuf, sizeof(debugBuf),
               "Decrypt start: %u sec, %u usec", start.getSeconds(), start.getUSeconds());
           Fw::LogStringArg dbg(debugBuf);
-          this->log_ACTIVITY_HI_DebugLog(dbg);
+          this->log_ACTIVITY_LO_DebugLog(dbg);
       }
 
       // 5) Call Ascon decrypt
@@ -301,7 +301,7 @@ namespace Components {
           std::snprintf(debugBuf, sizeof(debugBuf),
               "Decrypt end: %u sec, %u usec", end.getSeconds(), end.getUSeconds());
           Fw::LogStringArg dbg(debugBuf);
-          this->log_ACTIVITY_HI_DebugLog(dbg);
+          this->log_ACTIVITY_LO_DebugLog(dbg);
       }
 
       if (ret != 0) {
@@ -312,7 +312,7 @@ namespace Components {
                   "Ascon decryption failed (ret=%d). Possibly incomplete or tampered ciphertext.",
                   ret);
               Fw::LogStringArg dbgArg(dbgBuf);
-              this->log_ACTIVITY_HI_DebugLog(dbgArg);
+              this->log_ACTIVITY_LO_DebugLog(dbgArg);
           }
           this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::EXECUTION_ERROR);
           return;
@@ -328,7 +328,7 @@ namespace Components {
           std::snprintf(debugBuf, sizeof(debugBuf),
               "Decrypt completed in %u usec", m_decTimeUs);
           Fw::LogStringArg dbgArg(debugBuf);
-          this->log_ACTIVITY_HI_DebugLog(dbgArg);
+          this->log_ACTIVITY_LO_DebugLog(dbgArg);
       }
 
       // 6) Resize plaintext to actual length pLen
@@ -342,7 +342,7 @@ namespace Components {
           std::snprintf(dbgBuf, sizeof(dbgBuf),
               "Decryption success. Plaintext length: %llu", pLen);
           Fw::LogStringArg dbgArg(dbgBuf);
-          this->log_ACTIVITY_HI_DebugLog(dbgArg);
+          this->log_ACTIVITY_LO_DebugLog(dbgArg);
       }
 
       // 8) Convert plaintext to ASCII for logging
@@ -371,7 +371,7 @@ namespace Components {
 ) {
     FILE* logFile = fopen("benchmark.csv", "a");
     if (!logFile) {
-        this->log_ACTIVITY_HI_DebugLog(Fw::LogStringArg("Failed to open benchmark.csv"));
+        this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg("Failed to open benchmark.csv"));
         this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::EXECUTION_ERROR);
         return;
     }
@@ -398,7 +398,7 @@ namespace Components {
         Fw::Time encEnd = this->getTime();
 
         if (encRet != 0) {
-            this->log_ACTIVITY_HI_DebugLog(Fw::LogStringArg("Benchmark: Encrypt failed"));
+            this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg("Benchmark: Encrypt failed"));
             fclose(logFile);
             this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::EXECUTION_ERROR);
             return;
@@ -420,7 +420,7 @@ namespace Components {
         Fw::Time decEnd = this->getTime();
 
         if (decRet != 0) {
-            this->log_ACTIVITY_HI_DebugLog(Fw::LogStringArg("Benchmark: Decrypt failed"));
+            this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg("Benchmark: Decrypt failed"));
             fclose(logFile);
             this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::EXECUTION_ERROR);
             return;
@@ -433,7 +433,7 @@ namespace Components {
     }
 
     fclose(logFile);
-    this->log_ACTIVITY_HI_DebugLog(Fw::LogStringArg("Benchmark completed"));
+    this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg("Benchmark completed"));
     this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::OK);
 }
   

@@ -47,7 +47,7 @@ module Components {
     @ A debug event for developer messages
     event DebugLog(
     msg: string size 128 @< Debug message
-    ) severity activity high format "DEBUG: {}"
+    ) severity activity low format "DEBUG: {}"
 
 
     @ (Optional) If you need to pass data in/out as raw bytes

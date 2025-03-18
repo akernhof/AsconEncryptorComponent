@@ -1,6 +1,6 @@
 module Components {
-    @ Component for WiFi Communication
-    active component WifiHandler {
+    @ Listens for UDP bytes, decodes, decrypts, logs ASCII
+    active component WifiReceiver {
 
         # One async command/port is required for active components
         # This should be overridden by the developers with a useful command/port
@@ -11,22 +11,26 @@ module Components {
         #### Uncomment the following examples to start customizing your component ####
         ##############################################################################
 
+        
+        @ Telemetry: how many messages we've received
+        telemetry RxCount: U32
+
+        @ Logs the ciphertext size or any debug info
+        event DebugLog(
+        msg: string size 128
+        ) severity activity low format "DEBUG: {}"
+
+        @ Logs successful decryption results (plaintext)
+        event DecryptionSuccess(
+        plaintext: string size 1024
+        ) severity activity high format "WifiReceiver DECRYPTED: {}"
+
+        # We schedule this component to poll the UDP socket
+        sync input port run: Svc.Sched
+
         # @ Example async command
         # async command COMMAND_NAME(param_name: U32)
 
-        @ Input port to receive the encrypted buffer
-        async input port EncryptedDataIn: Fw.BufferSend
-
-        @ Event indicating encrypted data was received and is about to be sent
-        event ReceivedEncryptedData(
-        dataSize: U32
-        ) severity activity high format "WifiHandler received encrypted data of size: {}"
-
-        @ Event for logging debug messages
-        event DebugLog(
-            msg: string size 128
-        ) severity activity low format "DEBUG: {}"        
-               
         # @ Example telemetry counter
         # telemetry ExampleCounter: U64
 

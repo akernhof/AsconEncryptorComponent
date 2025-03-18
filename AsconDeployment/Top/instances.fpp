@@ -23,6 +23,11 @@ module AsconDeployment {
     stack size (64 * 1024) \
     priority 94
 
+  instance wifiReceiver: Components.WifiReceiver base id 0x1100 \
+  queue size 10 \
+  stack size (64 * 1024) \
+  priority 94
+
   instance blockDrv: Drv.BlockDriver base id 0x0100 \
     queue size Default.QUEUE_SIZE \
     stack size Default.STACK_SIZE \

@@ -11,10 +11,9 @@
 ####
 
 set(SOURCE_FILES
-  "${CMAKE_CURRENT_LIST_DIR}/AsconEncryptor.fpp"
-  "${CMAKE_CURRENT_LIST_DIR}/AsconEncryptor.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/WifiReceiver.fpp"
+  "${CMAKE_CURRENT_LIST_DIR}/WifiReceiver.cpp"
 )
-
 
 
 # Uncomment and add any modules that this component depends on, else
@@ -25,9 +24,6 @@ set(SOURCE_FILES
 # `Ref/SignalGen/CMakeLists.txt` will be named `Ref_SignalGen`.  `Ref/SignalGen`
 # is an acceptable alternative and will be internally converted to `Ref_SignalGen`.
 #
-# Now tell F´ to link the `ascon` library
-# by declaring it in `MOD_DEPS`.
-# (This is how fprime-util knows to link them.)
 
 set(MOD_DEPS
   ascon
@@ -38,9 +34,9 @@ register_fprime_module()
 
 ### Unit Tests ###
 # set(UT_SOURCE_FILES
-#   "${CMAKE_CURRENT_LIST_DIR}/AsconEncryptor.fpp"
-#   "${CMAKE_CURRENT_LIST_DIR}/test/ut/AsconEncryptorTestMain.cpp"
-#   "${CMAKE_CURRENT_LIST_DIR}/test/ut/AsconEncryptorTester.cpp"
+#   "${CMAKE_CURRENT_LIST_DIR}/WifiReceiver.fpp"
+#   "${CMAKE_CURRENT_LIST_DIR}/test/ut/WifiReceiverTestMain.cpp"
+#   "${CMAKE_CURRENT_LIST_DIR}/test/ut/WifiReceiverTester.cpp"
 # )
 # set(UT_MOD_DEPS
 #   STest

@@ -18,6 +18,7 @@ module AsconDeployment {
 
     instance asconEncryptor
     instance wifiHandler
+    instance wifiReceiver
     instance $health
     instance blockDrv
     instance tlmSend
@@ -101,6 +102,7 @@ module AsconDeployment {
       rateGroup1.RateGroupMemberOut[0] -> tlmSend.Run
       rateGroup1.RateGroupMemberOut[1] -> fileDownlink.Run
       rateGroup1.RateGroupMemberOut[2] -> systemResources.run
+      rateGroup1.RateGroupMemberOut[3] -> wifiReceiver.run
 
       # Rate group 2
       rateGroupDriver.CycleOut[Ports_RateGroups.rateGroup2] -> rateGroup2.CycleIn

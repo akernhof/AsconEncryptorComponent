@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <cstring> // for memset, etc.
+#include <algorithm> // Added for std::min
 
 namespace Components {
 
@@ -30,7 +31,16 @@ namespace Components {
 
       this->log_ACTIVITY_HI_ReceivedEncryptedData(dataSize);
 
-      // 2) Example: open a UDP socket and send to 192.168.1.100:5000
+      // Fix 4: Log Sent Data
+      char hexDbg[128] = {0};
+      for (U32 i = 0; i < std::min(dataSize, 16U); i++) {
+        snprintf(hexDbg + strlen(hexDbg), sizeof(hexDbg) - strlen(hexDbg), "%02X ", dataPtr[i]);
+      }
+      char dbg[128];
+      snprintf(dbg, sizeof(dbg), "Sending hex: %s", hexDbg);
+      this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg(dbg));
+
+      // 2) Example: open a UDP socket and send to 127.0.0.1:6000
       int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
       if (sockfd < 0) {
           // Potentially log an event or handle error
