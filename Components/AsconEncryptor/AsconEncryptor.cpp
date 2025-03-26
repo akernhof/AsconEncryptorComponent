@@ -3,28 +3,16 @@
 #include <stdexcept>
 #include <vector>
 #include <cstdio>
+#include <fstream> // For file I/O
+#include <random>  // For random number generation
 #include "Fw/Types/Assert.hpp"
 #include "Fw/Logger/Logger.hpp"
 
-// -------------------------------
-// ASCON HEADERS (C library)
-// -------------------------------
+// ASCON HEADERS (C library) - Already included in .hpp, but kept here for completeness
 extern "C" {
     #include "crypto_aead.h"  // crypto_aead_encrypt, crypto_aead_decrypt
     #include "api.h"          // CRYPTO_KEYBYTES, CRYPTO_NPUBBYTES, etc.
 }
-
-// A fixed 16-byte key for demonstration purposes
-static const unsigned char KEY[CRYPTO_KEYBYTES] = {
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-    0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F
-};
-
-// A fixed 16-byte nonce (IV) for demonstration purposes
-static const unsigned char NONCE[CRYPTO_NPUBBYTES] = {
-    0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7,
-    0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF
-};
 
 namespace Components {
 
@@ -39,6 +27,7 @@ namespace Components {
       m_encTimeUs(0),
       m_decTimeUs(0)
   {
+    this->loadSharedKey(); // Load the shared key during construction
   }
 
   AsconEncryptor::~AsconEncryptor() {
@@ -86,131 +75,174 @@ namespace Components {
   }
 
   // ----------------------------------------------------------------------
-  // Encrypt
+  // Load Shared Key
   // ----------------------------------------------------------------------
+  void AsconEncryptor::loadSharedKey() {
+      const char* keyFile = "/tmp/shared_key.bin";
+      std::ifstream keyIn(keyFile, std::ios::in | std::ios::binary);
 
-  void AsconEncryptor::Encrypt_cmdHandler(
-      FwOpcodeType opCode,
-      U32 cmdSeq,
-      const Fw::CmdStringArg& data
-  ) {
-      // 1) Convert ASCII input -> raw bytes    
-      const char* plaintextStr = data.toChar();
-      size_t plaintext_len = std::strlen(plaintextStr);
-
-      // DEBUG LOG ADDED (plaintext length)
-      {
+      if (!keyIn) {
           char debugBuf[128];
-          std::snprintf(debugBuf, sizeof(debugBuf),
-              "Encrypt: plaintext length: %zu", plaintext_len
-          );
+          std::snprintf(debugBuf, sizeof(debugBuf), "Failed to open shared key file at %s", keyFile);
           Fw::LogStringArg dbg(debugBuf);
           this->log_ACTIVITY_LO_DebugLog(dbg);
-      }
-
-      std::vector<uint8_t> plaintext(
-          reinterpret_cast<const uint8_t*>(plaintextStr),
-          reinterpret_cast<const uint8_t*>(plaintextStr) + plaintext_len
-      );
-
-      // 2) Prepare output buffer for ciphertext + auth tag
-      std::vector<unsigned char> ciphertext(plaintext.size() + CRYPTO_ABYTES);
-
-      // Benchmarking: Start timing
-      Fw::Time start = this->getTime();
-      {
-          char debugBuf[128];
-          std::snprintf(debugBuf, sizeof(debugBuf),
-              "Encrypt start: %u sec, %u usec", start.getSeconds(), start.getUSeconds());
-          Fw::LogStringArg dbg(debugBuf);
-          this->log_ACTIVITY_LO_DebugLog(dbg);
-      }
-
-      // 3) Perform Ascon AEAD encryption      
-      unsigned long long cLen = 0;
-      int ret = crypto_aead_encrypt(
-          ciphertext.data(), &cLen,
-          plaintext.data(), static_cast<unsigned long long>(plaintext.size()),
-          nullptr, 0,
-          nullptr,
-          NONCE,
-          KEY
-      );
-
-      // Benchmarking: End timing
-      Fw::Time end = this->getTime();
-      {
-          char debugBuf[128];
-          std::snprintf(debugBuf, sizeof(debugBuf),
-              "Encrypt end: %u sec, %u usec", end.getSeconds(), end.getUSeconds());
-          Fw::LogStringArg dbg(debugBuf);
-          this->log_ACTIVITY_LO_DebugLog(dbg);
-      }
-
-      if (ret != 0) {
-          this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::EXECUTION_ERROR);
+          memset(this->sharedKey, 0, CRYPTO_KEYBYTES);
           return;
       }
 
-      // Benchmarking: Calculate and log total time
-      U32 startUs = start.getSeconds() * 1000000 + start.getUSeconds();
-      U32 endUs = end.getSeconds() * 1000000 + end.getUSeconds();
-      m_encTimeUs = (endUs > startUs) ? (endUs - startUs) : 0;
-      this->tlmWrite_EncryptTimeUs(m_encTimeUs);
-      {
+      keyIn.read(reinterpret_cast<char*>(this->sharedKey), CRYPTO_KEYBYTES);
+      if (keyIn.gcount() != CRYPTO_KEYBYTES) {
           char debugBuf[128];
-          std::snprintf(debugBuf, sizeof(debugBuf),
-              "Encrypt completed in %u usec", m_encTimeUs);
+          std::snprintf(debugBuf, sizeof(debugBuf), "Shared key read incomplete: got %ld bytes", static_cast<long>(keyIn.gcount()));
           Fw::LogStringArg dbg(debugBuf);
           this->log_ACTIVITY_LO_DebugLog(dbg);
-      }
-
-      ciphertext.resize(cLen);
-
-      // Fix: Create a buffer with a copy of the ciphertext
-      Fw::Buffer outBuffer;
-      U8* bufferData = new U8[cLen]; // Allocate persistent memory
-      memcpy(bufferData, ciphertext.data(), cLen); // Copy the ciphertext
-      outBuffer.setData(bufferData);
-      outBuffer.setSize(cLen);
-
-      if (this->isConnected_EncryptedDataOut_OutputPort(0)) {
-          this->EncryptedDataOut_out(0, outBuffer);
+          memset(this->sharedKey, 0, CRYPTO_KEYBYTES);
       } else {
-          Fw::LogStringArg msg("EncryptedDataOut not connected!");
-          this->log_ACTIVITY_LO_DebugLog(msg);
-          delete[] bufferData; // Clean up if port isn’t connected
-      }
-      
-      // DEBUG LOG ADDED (ciphertext length)      
-      {
           char debugBuf[128];
-          std::snprintf(debugBuf, sizeof(debugBuf),
-              "Encrypt: ciphertext length: %llu", cLen);
+          std::snprintf(debugBuf, sizeof(debugBuf), "Loaded shared key from %s", keyFile);
           Fw::LogStringArg dbg(debugBuf);
           this->log_ACTIVITY_LO_DebugLog(dbg);
       }
 
-      // 4) Convert ciphertext to hex for logging      
-      std::string cipherHex = this->bytesToHex(std::vector<uint8_t>(
-          ciphertext.begin(), ciphertext.end()
-      ));
-
-      // 5) Log event      
-      Fw::LogStringArg cipherLog(cipherHex.c_str());
-      this->log_ACTIVITY_HI_EncryptionSuccess(cipherLog);
-
-      // 6) Telemetry increment      
-      m_encCount++;
-      this->tlmWrite_EncryptionCount(m_encCount);
-
-      // 7) Respond      
-      this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::OK);
+      keyIn.close();
   }
 
   // ----------------------------------------------------------------------
+  // Encrypt
+  // ----------------------------------------------------------------------
+  void AsconEncryptor::Encrypt_cmdHandler(
+    FwOpcodeType opCode,
+    U32 cmdSeq,
+    const Fw::CmdStringArg& data,
+    U8 person,      // New person parameter
+    U16 portnumber  // Existing port parameter
+) {
+    // 1) Convert ASCII input -> raw bytes    
+    const char* plaintextStr = data.toChar();
+    size_t plaintext_len = std::strlen(plaintextStr);
+
+    {
+        char debugBuf[128];
+        std::snprintf(debugBuf, sizeof(debugBuf), "Encrypt: plaintext length: %zu, person: %u, port: %u", plaintext_len, person, portnumber);
+        Fw::LogStringArg dbg(debugBuf);
+        this->log_ACTIVITY_LO_DebugLog(dbg);
+    }
+
+    std::vector<uint8_t> plaintext(
+        reinterpret_cast<const uint8_t*>(plaintextStr),
+        reinterpret_cast<const uint8_t*>(plaintextStr) + plaintext_len
+    );
+
+    // 2) Generate a random nonce
+    U8* nonce = new U8[CRYPTO_NPUBBYTES];
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(0, 255);
+    for (size_t i = 0; i < CRYPTO_NPUBBYTES; ++i) {
+        nonce[i] = static_cast<U8>(dis(gen));
+    }
+
+    // 3) Prepare output buffer for ciphertext + auth tag
+    std::vector<unsigned char> ciphertext(plaintext.size() + CRYPTO_ABYTES);
+    unsigned long long cLen = 0;
+
+    // Benchmarking: Start timing
+    Fw::Time start = this->getTime();
+    {
+        char debugBuf[128];
+        std::snprintf(debugBuf, sizeof(debugBuf), "Encrypt start: %u sec, %u usec", start.getSeconds(), start.getUSeconds());
+        Fw::LogStringArg dbg(debugBuf);
+        this->log_ACTIVITY_LO_DebugLog(dbg);
+    }
+
+    // 4) Perform Ascon AEAD encryption
+    int ret = crypto_aead_encrypt(
+        ciphertext.data(), &cLen,
+        plaintext.data(), static_cast<unsigned long long>(plaintext.size()),
+        nullptr, 0,
+        nullptr,
+        nonce,
+        this->sharedKey
+    );
+
+    // Benchmarking: End timing
+    Fw::Time end = this->getTime();
+    {
+        char debugBuf[128];
+        std::snprintf(debugBuf, sizeof(debugBuf), "Encrypt end: %u sec, %u usec", end.getSeconds(), end.getUSeconds());
+        Fw::LogStringArg dbg(debugBuf);
+        this->log_ACTIVITY_LO_DebugLog(dbg);
+    }
+
+    if (ret != 0) {
+        char debugBuf[128];
+        std::snprintf(debugBuf, sizeof(debugBuf), "[ASCON] Encryption failed");
+        Fw::LogStringArg dbg(debugBuf);
+        this->log_ACTIVITY_LO_DebugLog(dbg);
+        delete[] nonce;
+        this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::EXECUTION_ERROR);
+        return;
+    }
+
+    // Benchmarking: Calculate and log total time
+    U32 startUs = start.getSeconds() * 1000000 + start.getUSeconds();
+    U32 endUs = end.getSeconds() * 1000000 + end.getUSeconds();
+    m_encTimeUs = (endUs > startUs) ? (endUs - startUs) : 0;
+    this->tlmWrite_EncryptTimeUs(m_encTimeUs);
+    {
+        char debugBuf[128];
+        std::snprintf(debugBuf, sizeof(debugBuf), "Encrypt completed in %u usec", m_encTimeUs);
+        Fw::LogStringArg dbg(debugBuf);
+        this->log_ACTIVITY_LO_DebugLog(dbg);
+    }
+
+    ciphertext.resize(cLen);
+
+    // 5) Combine person, portnumber, nonce, and ciphertext into a single buffer
+    const U32 totalSize = sizeof(U8) + sizeof(U16) + CRYPTO_NPUBBYTES + cLen; // 1 person + 2 port + 16 nonce + ciphertext
+    U8* combinedData = new U8[totalSize];
+    // Person (1 byte)
+    combinedData[0] = person;
+    // Portnumber (2 bytes)
+    combinedData[1] = static_cast<U8>(portnumber >> 8); // High byte
+    combinedData[2] = static_cast<U8>(portnumber & 0xFF); // Low byte
+    // Nonce (16 bytes)
+    memcpy(combinedData + sizeof(U8) + sizeof(U16), nonce, CRYPTO_NPUBBYTES);
+    // Ciphertext
+    memcpy(combinedData + sizeof(U8) + sizeof(U16) + CRYPTO_NPUBBYTES, ciphertext.data(), cLen);
+    Fw::Buffer outBuffer(combinedData, totalSize); // e.g., 39 bytes for "test"
+
+    delete[] nonce;
+
+    // 6) Output via EncryptedDataOut
+    if (this->isConnected_EncryptedDataOut_OutputPort(0)) {
+        this->EncryptedDataOut_out(0, outBuffer);
+    } else {
+        delete[] combinedData;
+    }
+
+    // 7) Log transmission
+    {
+        char debugBuf[128];
+        std::snprintf(debugBuf, sizeof(debugBuf), "[ASCON] Sent nonce + cipher. Total length: %u", totalSize);
+        Fw::LogStringArg dbg(debugBuf);
+        this->log_ACTIVITY_LO_DebugLog(dbg);
+    }
+
+    // 8) Log ciphertext
+    std::string cipherHex = this->bytesToHex(std::vector<uint8_t>(ciphertext.begin(), ciphertext.end()));
+    Fw::LogStringArg cipherLog(cipherHex.c_str());
+    this->log_ACTIVITY_HI_EncryptionSuccess(cipherLog);
+
+    // 9) Telemetry and response
+    m_encCount++;
+    this->tlmWrite_EncryptionCount(m_encCount);
+    this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::OK);
+}
+
+  // ----------------------------------------------------------------------
   // Decrypt
-  // ----------------------------------------------------------------------  
+  // ----------------------------------------------------------------------
   void AsconEncryptor::Decrypt_cmdHandler(
       FwOpcodeType opCode,
       U32 cmdSeq,
@@ -262,7 +294,6 @@ namespace Components {
       }
 
       {
-          // Log how many cipher bytes we got  
           char dbgBuf[128];
           std::snprintf(dbgBuf, sizeof(dbgBuf),
               "cipherBytes length after parse: %zu", cipherBytes.size());
@@ -284,14 +315,16 @@ namespace Components {
           this->log_ACTIVITY_LO_DebugLog(dbg);
       }
 
-      // 5) Call Ascon decrypt
+      // 5) Call Ascon decrypt - Note: Nonce is missing here!
+      // Temporarily use a placeholder nonce (this needs to be fixed)
+      U8 tempNonce[CRYPTO_NPUBBYTES] = {0}; // Placeholder; needs actual nonce
       int ret = crypto_aead_decrypt(
           plaintext.data(), &pLen,
           nullptr,
           cipherBytes.data(), (unsigned long long)cipherBytes.size(),
           nullptr, 0,
-          NONCE,
-          KEY
+          tempNonce, // Temporary fix; see note below
+          this->sharedKey
       );
 
       // Benchmarking: End timing
@@ -305,15 +338,12 @@ namespace Components {
       }
 
       if (ret != 0) {
-          // Auth failed or bad ciphertext => log debug event
-          {
-              char dbgBuf[100];
-              std::snprintf(dbgBuf, sizeof(dbgBuf),
-                  "Ascon decryption failed (ret=%d). Possibly incomplete or tampered ciphertext.",
-                  ret);
-              Fw::LogStringArg dbgArg(dbgBuf);
-              this->log_ACTIVITY_LO_DebugLog(dbgArg);
-          }
+          char dbgBuf[100];
+          std::snprintf(dbgBuf, sizeof(dbgBuf),
+              "Ascon decryption failed (ret=%d). Possibly incomplete or tampered ciphertext.",
+              ret);
+          Fw::LogStringArg dbgArg(dbgBuf);
+          this->log_ACTIVITY_LO_DebugLog(dbgArg);
           this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::EXECUTION_ERROR);
           return;
       }
@@ -331,10 +361,7 @@ namespace Components {
           this->log_ACTIVITY_LO_DebugLog(dbgArg);
       }
 
-      // 6) Resize plaintext to actual length pLen
       plaintext.resize(pLen);
-
-
 
       // 7) Log the final plaintext length
       {
@@ -348,7 +375,7 @@ namespace Components {
       // 8) Convert plaintext to ASCII for logging
       std::string plainAscii(
           reinterpret_cast<const char*>(plaintext.data()),
-          reinterpret_cast<const char*>(plaintext.data() + plaintext.size())
+          plaintext.size()
       );
 
       // 9) Standard success event
@@ -363,12 +390,15 @@ namespace Components {
       this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::OK);
   }
 
+  // ----------------------------------------------------------------------
+  // Benchmark
+  // ----------------------------------------------------------------------
   void AsconEncryptor::Benchmark_cmdHandler(
     FwOpcodeType opCode,
     U32 cmdSeq,
     U32 length,
     U32 runs
-) {
+  ) {
     FILE* logFile = fopen("benchmark.csv", "a");
     if (!logFile) {
         this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg("Failed to open benchmark.csv"));
@@ -385,6 +415,15 @@ namespace Components {
     std::vector<unsigned char> decrypted(length);
 
     for (U32 i = 0; i < runs; i++) {
+        // Generate a random nonce for each iteration
+        U8 nonce[CRYPTO_NPUBBYTES];
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dis(0, 255);
+        for (size_t j = 0; j < CRYPTO_NPUBBYTES; ++j) {
+            nonce[j] = static_cast<U8>(dis(gen));
+        }
+
         Fw::Time encStart = this->getTime();
         unsigned long long cLen = 0;
         int encRet = crypto_aead_encrypt(
@@ -392,8 +431,8 @@ namespace Components {
             plaintext.data(), length,
             nullptr, 0,
             nullptr,
-            NONCE,
-            KEY
+            nonce,
+            this->sharedKey
         );
         Fw::Time encEnd = this->getTime();
 
@@ -414,8 +453,8 @@ namespace Components {
             nullptr,
             ciphertext.data(), cLen,
             nullptr, 0,
-            NONCE,
-            KEY
+            nonce,
+            this->sharedKey
         );
         Fw::Time decEnd = this->getTime();
 
@@ -435,6 +474,17 @@ namespace Components {
     fclose(logFile);
     this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg("Benchmark completed"));
     this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::OK);
-}
-  
+  }
+
+  // ----------------------------------------------------------------------
+  // New port handler implementations
+  // ----------------------------------------------------------------------
+  void AsconEncryptor::nonceOut_out(NATIVE_INT_TYPE portNum, Fw::Buffer& nonce) {
+      this->nonceOut_out(portNum, nonce); // Forward to autogenerated port call
+  }
+
+  void AsconEncryptor::cipherOut_out(NATIVE_INT_TYPE portNum, Fw::Buffer& cipher) {
+      this->cipherOut_out(portNum, cipher); // Forward to autogenerated port call
+  }
+
 } // namespace Components

@@ -3,12 +3,11 @@ module Components {
   @ ASCON encryption component for F´
   active component AsconEncryptor {
 
-    # One async command/port is required for active components
-    # This should be overridden by the developers with a useful command/port
-
     @ Encrypts a plaintext string
     async command Encrypt(
         data: string size 1024 @< plaintext as a normal ASCII string to encrypt
+        person: U8 @< 1 for UGV, 2 for UAV
+        portnumber: U16 @< UDP port to send encrypted data to    
     ) opcode 0x100
 
     @ Decrypts a ciphertext string
@@ -21,7 +20,6 @@ module Components {
         length: U32 @< Message length in bytes
         runs: U32 @< Number of benchmark runs
     ) opcode 0x102
-
 
     @ Tracks how many times we've encrypted
     telemetry EncryptionCount: U32
@@ -38,7 +36,6 @@ module Components {
     result: string size 1024 @< Encrypted text or success info
     ) severity activity high format "Encryption success: {}"
 
-
     @ Event logged upon successful decryption
     event DecryptionSuccess(
     result: string size 1024 @< Decrypted text or success info
@@ -49,32 +46,12 @@ module Components {
     msg: string size 128 @< Debug message
     ) severity activity low format "DEBUG: {}"
 
+    @ Output port for encrypted data
+    output port EncryptedDataOut: Fw.BufferSend
 
-    @ (Optional) If you need to pass data in/out as raw bytes
-    # async input port Encrypt_Input: Fw.BufferGet
-     output port EncryptedDataOut: Fw.BufferSend
-    # async input port Decrypt_Input: Fw.BufferGet
-    # output port Decrypt_Output: Fw.BufferSend
-
-
-    #####################
-    # Example placeholders
-    #####################
-
-    # @ Example async command
-    # async command COMMAND_NAME(param_name: U32)
-
-    # @ Example telemetry counter
-    # telemetry ExampleCounter: U64
-
-    # @ Example event
-    # event ExampleStateEvent(example_state: Fw.On) severity activity high id 0 format "State set to {}"
-
-    # @ Example port: receiving calls from the rate group
-    # sync input port run: Svc.Sched
-
-    # @ Example parameter
-    # param PARAMETER_NAME: U32
+    @ New output ports from the patch
+    output port nonceOut: Fw.BufferSend
+    output port cipherOut: Fw.BufferSend
 
     ###############################################################################
     # Standard AC Ports: Required for Channels, Events, Commands, and Parameters  #

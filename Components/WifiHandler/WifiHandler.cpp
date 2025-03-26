@@ -22,53 +22,84 @@ namespace Components {
   }
 
   void WifiHandler::EncryptedDataIn_handler(
-      NATIVE_INT_TYPE portNum,
-      Fw::Buffer &fwBuffer
-  ) {
-      // 1) Extract data pointer and size
-      const U8* dataPtr = fwBuffer.getData();
-      const U32 dataSize = fwBuffer.getSize();
+    NATIVE_INT_TYPE portNum,
+    Fw::Buffer &fwBuffer
+) {
+    const U8* dataPtr = fwBuffer.getData();
+    const U32 dataSize = fwBuffer.getSize();
 
-      this->log_ACTIVITY_HI_ReceivedEncryptedData(dataSize);
+    // Check minimum size (person + portnumber + nonce + smallest ciphertext)
+    if (dataSize < sizeof(U8) + sizeof(U16) + CRYPTO_NPUBBYTES + CRYPTO_ABYTES) {
+        this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg("Buffer too small"));
+        return;
+    }
 
-      // Fix 4: Log Sent Data
-      char hexDbg[128] = {0};
-      for (U32 i = 0; i < std::min(dataSize, 16U); i++) {
-        snprintf(hexDbg + strlen(hexDbg), sizeof(hexDbg) - strlen(hexDbg), "%02X ", dataPtr[i]);
-      }
-      char dbg[128];
-      snprintf(dbg, sizeof(dbg), "Sending hex: %s", hexDbg);
-      this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg(dbg));
+    // Extract person and portnumber
+    U8 person = dataPtr[0];
+    U16 portnumber = (static_cast<U16>(dataPtr[1]) << 8) | dataPtr[2];
 
-      // 2) Example: open a UDP socket and send to 127.0.0.1:6000
-      int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-      if (sockfd < 0) {
-          // Potentially log an event or handle error
-          return;
-      }
+    // Calculate payload size (nonce + ciphertext only)
+    const U32 payloadSize = dataSize - sizeof(U8) - sizeof(U16); // e.g., 36 bytes for "test"
+    const U8* payload = dataPtr + sizeof(U8) + sizeof(U16); // Skip person and portnumber
 
-      struct sockaddr_in destAddr;
-      memset(&destAddr, 0, sizeof(destAddr));
-      destAddr.sin_family = AF_INET;
-      destAddr.sin_port = htons(6000);
-      inet_pton(AF_INET, "127.0.0.1", &destAddr.sin_addr);
+    this->log_ACTIVITY_HI_ReceivedEncryptedData(dataSize);
 
-      // 3) Send the data
-      ssize_t sent = sendto(
-          sockfd,
-          dataPtr,
-          dataSize,
-          0,
-          (struct sockaddr*)&destAddr,
-          sizeof(destAddr)
-      );
+    // Log full payload in hex (up to payloadSize bytes)
+    char hexDbg[256] = {0}; // Increased size to fit full dump (36 bytes = 108 chars with spaces)
+    for (U32 i = 0; i < payloadSize; i++) {
+        snprintf(hexDbg + strlen(hexDbg), sizeof(hexDbg) - strlen(hexDbg), "%02X ", payload[i]);
+    }
+    char dbg[256]; // Increased to match
+    snprintf(dbg, sizeof(dbg), "Sending %u bytes to person %u, port %u: %s", payloadSize, person, portnumber, hexDbg);
+    this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg(dbg));
 
-      if (sent < 0) {
-          // Log an event or handle error
-      }
+    // Create UDP socket
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg("Socket creation failed"));
+        return;
+    }
 
-      close(sockfd);
-  }
+    struct sockaddr_in destAddr;
+    memset(&destAddr, 0, sizeof(destAddr));
+    destAddr.sin_family = AF_INET;
+    destAddr.sin_port = htons(portnumber);
+
+    // Hardcoded IPs based on person
+    const char* destIP;
+    switch (person) {
+        case 1: // UGV
+            destIP = "192.168.1.101"; // Example IP for UGV
+            break;
+        case 2: // UAV
+            destIP = "192.168.0.106"; // Example IP for UAV (ethernet right now for testing)
+            break;
+        case 3: // Fprime
+            destIP = "127.0.0.1"; // Example IP for Fprime
+            break;
+        default:
+            this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg("Invalid person value"));
+            close(sockfd);
+            return;
+    }
+    inet_pton(AF_INET, destIP, &destAddr.sin_addr);
+
+    // Send only nonce + ciphertext (36 bytes)
+    ssize_t sent = sendto(
+        sockfd,
+        payload,
+        payloadSize,
+        0,
+        (struct sockaddr*)&destAddr,
+        sizeof(destAddr)
+    );
+
+    if (sent < 0) {
+        this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg("Send failed"));
+    }
+
+    close(sockfd);
+}
 
   void WifiHandler::TODO_cmdHandler(FwOpcodeType opCode, U32 cmdSeq) {
       // Example command no-op

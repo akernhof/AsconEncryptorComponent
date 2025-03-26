@@ -12,6 +12,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>  // for std::min
+#include <fstream>    // For file I/O
 
 // ASCON library headers
 extern "C" {
@@ -19,27 +20,16 @@ extern "C" {
   #include "api.h"
 }
 
-// Matching the same KEY and NONCE as your AsconEncryptor
-const unsigned char Components::WifiReceiver::KEY[16] = {
-  0x00, 0x01, 0x02, 0x03,
-  0x04, 0x05, 0x06, 0x07,
-  0x08, 0x09, 0x0A, 0x0B,
-  0x0C, 0x0D, 0x0E, 0x0F
-};
-
-const unsigned char Components::WifiReceiver::NONCE[16] = {
-  0xA0, 0xA1, 0xA2, 0xA3,
-  0xA4, 0xA5, 0xA6, 0xA7,
-  0xA8, 0xA9, 0xAA, 0xAB,
-  0xAC, 0xAD, 0xAE, 0xAF
-};
-
 namespace Components {
 
   WifiReceiver::WifiReceiver(const char* compName)
   : WifiReceiverComponentBase(compName),
-    m_sockfd(-1)
+    m_sockfd(-1),
+    m_rxCount(0)
   {
+    // Load the shared key
+    this->loadSharedKey();
+
     // 1) Create a UDP socket
     this->m_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (this->m_sockfd < 0) {
@@ -49,12 +39,11 @@ namespace Components {
       return;
     }
 
-    // 2) Bind to a local port (6000 in this case) on 127.0.0.1
+    // 2) Bind to a local port (6000) on 127.0.0.1
     sockaddr_in localAddr;
     memset(&localAddr, 0, sizeof(localAddr));
     localAddr.sin_family = AF_INET;
     localAddr.sin_port = htons(6000);
-    // Replace INADDR_ANY with 127.0.0.1 (Fix 3)
     inet_pton(AF_INET, "127.0.0.1", &localAddr.sin_addr); // Bind to localhost only
 
     if (bind(this->m_sockfd, (struct sockaddr*)&localAddr, sizeof(localAddr)) < 0) {
@@ -77,6 +66,36 @@ namespace Components {
     if (this->m_sockfd >= 0) {
       close(this->m_sockfd);
     }
+  }
+
+  void WifiReceiver::loadSharedKey() {
+    const char* keyFile = "/tmp/shared_key.bin";
+    std::ifstream keyIn(keyFile, std::ios::in | std::ios::binary);
+
+    if (!keyIn) {
+      char debugBuf[128];
+      std::snprintf(debugBuf, sizeof(debugBuf), "Failed to open shared key file at %s", keyFile);
+      Fw::LogStringArg dbg(debugBuf);
+      this->log_ACTIVITY_LO_DebugLog(dbg);
+      memset(this->sharedKey, 0, CRYPTO_KEYBYTES);
+      return;
+    }
+
+    keyIn.read(reinterpret_cast<char*>(this->sharedKey), CRYPTO_KEYBYTES);
+    if (keyIn.gcount() != CRYPTO_KEYBYTES) {
+      char debugBuf[128];
+      std::snprintf(debugBuf, sizeof(debugBuf), "Shared key read incomplete: got %ld bytes", static_cast<long>(keyIn.gcount()));
+      Fw::LogStringArg dbg(debugBuf);
+      this->log_ACTIVITY_LO_DebugLog(dbg);
+      memset(this->sharedKey, 0, CRYPTO_KEYBYTES);
+    } else {
+      char debugBuf[128];
+      std::snprintf(debugBuf, sizeof(debugBuf), "Loaded shared key from %s", keyFile);
+      Fw::LogStringArg dbg(debugBuf);
+      this->log_ACTIVITY_LO_DebugLog(dbg);
+    }
+
+    keyIn.close();
   }
 
   void WifiReceiver::TODO_cmdHandler(FwOpcodeType opCode, U32 cmdSeq) {
@@ -103,7 +122,7 @@ namespace Components {
     );
 
     if (recvSize > 0) {
-      // Fix 1: Filter Sender
+      // Filter sender
       char senderIp[INET_ADDRSTRLEN];
       inet_ntop(AF_INET, &sender.sin_addr, senderIp, INET_ADDRSTRLEN);
       char dbgSender[128];
@@ -114,9 +133,20 @@ namespace Components {
         return;
       }
 
+      // Check minimum size (nonce + smallest possible ciphertext)
+      if (recvSize < CRYPTO_NPUBBYTES + CRYPTO_ABYTES) {
+        this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg("Packet too small"));
+        return;
+      }
+
+      // Extract nonce and ciphertext
+      const uint8_t* nonce = buffer;                          // First 16 bytes
+      const uint8_t* ciphertext = buffer + CRYPTO_NPUBBYTES;  // Rest of the buffer
+      size_t cipherSize = recvSize - CRYPTO_NPUBBYTES;
+
       // Log received packet size
       char dbg[128];
-      snprintf(dbg, sizeof(dbg), "Received %ld bytes on UDP port 6000", (long)recvSize);
+      snprintf(dbg, sizeof(dbg), "Received %ld bytes (nonce: 16, cipher: %zu)", (long)recvSize, cipherSize);
       this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg(dbg));
 
       // Log a short hex dump (first 16 bytes)
@@ -131,18 +161,18 @@ namespace Components {
       snprintf(dbgHex, sizeof(dbgHex), "Packet hex dump (first %zu bytes): %s", bytesToDump, hexDbg);
       this->log_ACTIVITY_LO_DebugLog(Fw::LogStringArg(dbgHex));
 
-      // Prepare a plaintext buffer with the same size as received ciphertext
-      std::vector<unsigned char> plaintext(recvSize);
+      // Prepare a plaintext buffer
+      std::vector<unsigned char> plaintext(cipherSize);
       unsigned long long pLen = 0;
 
-      // Attempt to decrypt the raw bytes using Ascon
+      // Attempt to decrypt using the received nonce and shared key
       int ret = crypto_aead_decrypt(
         plaintext.data(), &pLen,
         nullptr,
-        buffer, (unsigned long long) recvSize,
+        ciphertext, (unsigned long long)cipherSize,
         nullptr, 0,
-        NONCE,
-        KEY
+        nonce,
+        this->sharedKey
       );
 
       if (ret != 0) {
@@ -162,6 +192,10 @@ namespace Components {
 
       // Log the decrypted plaintext
       this->log_ACTIVITY_HI_DecryptionSuccess(Fw::LogStringArg(plainAscii.c_str()));
+
+      // Update telemetry
+      m_rxCount++;
+      this->tlmWrite_RxCount(m_rxCount);
     }
     else if (recvSize < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
       char dbg[128];

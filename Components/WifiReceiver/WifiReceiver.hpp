@@ -5,6 +5,10 @@
 
 namespace Components {
 
+  extern "C" {
+    #include "crypto_aead.h"  // crypto_aead_encrypt, crypto_aead_decrypt
+    #include "api.h"          // CRYPTO_KEYBYTES, CRYPTO_NPUBBYTES, etc.
+}
   class WifiReceiver : public WifiReceiverComponentBase {
     public:
       WifiReceiver(const char* compName);
@@ -17,12 +21,13 @@ namespace Components {
       // Minimal required command
       void TODO_cmdHandler(FwOpcodeType opCode, U32 cmdSeq) override;
 
+      // Load the shared key from file
+      void loadSharedKey();
+
     private:
       int m_sockfd;
-
-      // Hard-coded KEY and NONCE. Must match the other side's encryption.
-      static const unsigned char KEY[16];
-      static const unsigned char NONCE[16];
+      U8 sharedKey[CRYPTO_KEYBYTES];  // Shared key for decryption
+      U32 m_rxCount;  // Track received messages for telemetry
   };
 
 } // namespace Components

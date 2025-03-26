@@ -7,6 +7,10 @@
 
 namespace Components {
 
+  extern "C" {
+    #include "crypto_aead.h"  // crypto_aead_encrypt, crypto_aead_decrypt
+    #include "api.h"          // CRYPTO_KEYBYTES, CRYPTO_NPUBBYTES, etc.
+}
   class WifiHandler : public WifiHandlerComponentBase {
     public:
       WifiHandler(const char* compName);

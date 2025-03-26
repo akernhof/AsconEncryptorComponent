@@ -27,6 +27,10 @@ set(SOURCE_FILES
 #   MyPackage_MyOtherModule
 # )
 
+set(MOD_DEPS
+  ascon
+)
+
 register_fprime_module()
 
 
