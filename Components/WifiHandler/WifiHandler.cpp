@@ -72,7 +72,7 @@ namespace Components {
             destIP = "192.168.1.101"; // Example IP for UGV
             break;
         case 2: // UAV
-            destIP = "192.168.0.106"; // Example IP for UAV (ethernet right now for testing)
+            destIP = "10.69.0.222"; // Example IP for UAV (ethernet right now for testing)
             break;
         case 3: // Fprime
             destIP = "127.0.0.1"; // Example IP for Fprime

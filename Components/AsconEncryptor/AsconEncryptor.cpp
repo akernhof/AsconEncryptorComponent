@@ -8,7 +8,6 @@
 #include "Fw/Types/Assert.hpp"
 #include "Fw/Logger/Logger.hpp"
 
-// ASCON HEADERS (C library) - Already included in .hpp, but kept here for completeness
 extern "C" {
     #include "crypto_aead.h"  // crypto_aead_encrypt, crypto_aead_decrypt
     #include "api.h"          // CRYPTO_KEYBYTES, CRYPTO_NPUBBYTES, etc.
@@ -82,26 +81,37 @@ namespace Components {
       std::ifstream keyIn(keyFile, std::ios::in | std::ios::binary);
 
       if (!keyIn) {
+          // Log failure to open file
           char debugBuf[128];
-          std::snprintf(debugBuf, sizeof(debugBuf), "Failed to open shared key file at %s", keyFile);
-          Fw::LogStringArg dbg(debugBuf);
-          this->log_ACTIVITY_LO_DebugLog(dbg);
+          snprintf(debugBuf, sizeof(debugBuf), "Failed to open shared key file at %s", keyFile);
+          Fw::LogStringArg logArg(debugBuf);
+          this->log_ACTIVITY_LO_DebugLog(logArg);
           memset(this->sharedKey, 0, CRYPTO_KEYBYTES);
           return;
       }
 
       keyIn.read(reinterpret_cast<char*>(this->sharedKey), CRYPTO_KEYBYTES);
       if (keyIn.gcount() != CRYPTO_KEYBYTES) {
+          // Log incomplete read
           char debugBuf[128];
-          std::snprintf(debugBuf, sizeof(debugBuf), "Shared key read incomplete: got %ld bytes", static_cast<long>(keyIn.gcount()));
-          Fw::LogStringArg dbg(debugBuf);
-          this->log_ACTIVITY_LO_DebugLog(dbg);
+          snprintf(debugBuf, sizeof(debugBuf), "Shared key read incomplete: got %ld bytes", static_cast<long>(keyIn.gcount()));
+          Fw::LogStringArg logArg(debugBuf);
+          this->log_ACTIVITY_LO_DebugLog(logArg);
           memset(this->sharedKey, 0, CRYPTO_KEYBYTES);
       } else {
+          // Log successful load
           char debugBuf[128];
-          std::snprintf(debugBuf, sizeof(debugBuf), "Loaded shared key from %s", keyFile);
-          Fw::LogStringArg dbg(debugBuf);
-          this->log_ACTIVITY_LO_DebugLog(dbg);
+          snprintf(debugBuf, sizeof(debugBuf), "Loaded shared key from %s", keyFile);
+          Fw::LogStringArg logArg(debugBuf);
+          this->log_ACTIVITY_LO_DebugLog(logArg);
+
+          // Log the key contents in hex
+          std::vector<U8> keyVec(this->sharedKey, this->sharedKey + CRYPTO_KEYBYTES);
+          std::string keyHex = this->bytesToHex(keyVec);
+          char keyBuf[128];
+          snprintf(keyBuf, sizeof(keyBuf), "Shared key contents: %s", keyHex.c_str());
+          Fw::LogStringArg keyLogArg(keyBuf);
+          this->log_ACTIVITY_LO_DebugLog(keyLogArg);
       }
 
       keyIn.close();
