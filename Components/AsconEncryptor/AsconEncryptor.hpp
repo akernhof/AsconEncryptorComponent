@@ -67,7 +67,7 @@ namespace Components {
       U32 m_decCount;
       U32 m_encTimeUs;  // Encryption time in microseconds
       U32 m_decTimeUs;  // Decryption time in microseconds
-
+      bool keyLoaded;
       // ----------------------------------------------------------------------
       // New private member from the patch
       // ----------------------------------------------------------------------

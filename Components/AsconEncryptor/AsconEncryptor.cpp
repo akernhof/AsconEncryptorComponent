@@ -24,9 +24,10 @@ namespace Components {
       m_encCount(0),
       m_decCount(0),
       m_encTimeUs(0),
-      m_decTimeUs(0)
+      m_decTimeUs(0),
+      keyLoaded(false) // Initialize as not loaded
   {
-    this->loadSharedKey(); // Load the shared key during construction
+    
   }
 
   AsconEncryptor::~AsconEncryptor() {
@@ -77,45 +78,37 @@ namespace Components {
   // Load Shared Key
   // ----------------------------------------------------------------------
   void AsconEncryptor::loadSharedKey() {
-      const char* keyFile = "/tmp/shared_key.bin";
-      std::ifstream keyIn(keyFile, std::ios::in | std::ios::binary);
+    const char* keyFile = "/tmp/shared_key.bin";
+    std::ifstream keyIn(keyFile, std::ios::binary);
 
-      if (!keyIn) {
-          // Log failure to open file
-          char debugBuf[128];
-          snprintf(debugBuf, sizeof(debugBuf), "Failed to open shared key file at %s", keyFile);
-          Fw::LogStringArg logArg(debugBuf);
-          this->log_ACTIVITY_LO_DebugLog(logArg);
-          memset(this->sharedKey, 0, CRYPTO_KEYBYTES);
-          return;
-      }
+    char debugBuf[128];
+    if (!keyIn.is_open()) {
+        std::snprintf(debugBuf, sizeof(debugBuf), "Failed to open key file: %s", keyFile);
+        Fw::LogStringArg dbg(debugBuf);
+        this->log_ACTIVITY_LO_DebugLog(dbg);
+        std::memset(this->sharedKey, 0, CRYPTO_KEYBYTES);
+        return;
+    }
 
-      keyIn.read(reinterpret_cast<char*>(this->sharedKey), CRYPTO_KEYBYTES);
-      if (keyIn.gcount() != CRYPTO_KEYBYTES) {
-          // Log incomplete read
-          char debugBuf[128];
-          snprintf(debugBuf, sizeof(debugBuf), "Shared key read incomplete: got %ld bytes", static_cast<long>(keyIn.gcount()));
-          Fw::LogStringArg logArg(debugBuf);
-          this->log_ACTIVITY_LO_DebugLog(logArg);
-          memset(this->sharedKey, 0, CRYPTO_KEYBYTES);
-      } else {
-          // Log successful load
-          char debugBuf[128];
-          snprintf(debugBuf, sizeof(debugBuf), "Loaded shared key from %s", keyFile);
-          Fw::LogStringArg logArg(debugBuf);
-          this->log_ACTIVITY_LO_DebugLog(logArg);
+    keyIn.read(reinterpret_cast<char*>(this->sharedKey), CRYPTO_KEYBYTES);
+    std::streamsize bytesRead = keyIn.gcount();
+    keyIn.close();
 
-          // Log the key contents in hex
-          std::vector<U8> keyVec(this->sharedKey, this->sharedKey + CRYPTO_KEYBYTES);
-          std::string keyHex = this->bytesToHex(keyVec);
-          char keyBuf[128];
-          snprintf(keyBuf, sizeof(keyBuf), "Shared key contents: %s", keyHex.c_str());
-          Fw::LogStringArg keyLogArg(keyBuf);
-          this->log_ACTIVITY_LO_DebugLog(keyLogArg);
-      }
-
-      keyIn.close();
-  }
+    if (bytesRead != CRYPTO_KEYBYTES) {
+        std::snprintf(debugBuf, sizeof(debugBuf), "Key read incomplete: %ld/%d bytes",
+                      static_cast<long>(bytesRead), CRYPTO_KEYBYTES);
+        Fw::LogStringArg dbg(debugBuf);
+        this->log_ACTIVITY_LO_DebugLog(dbg);
+        std::memset(this->sharedKey, 0, CRYPTO_KEYBYTES);
+    } else {
+        std::vector<uint8_t> keyVec(this->sharedKey, this->sharedKey + CRYPTO_KEYBYTES);
+        std::string keyHex = this->bytesToHex(keyVec);
+        std::snprintf(debugBuf, sizeof(debugBuf), "Key loaded: %s", keyHex.c_str());
+        Fw::LogStringArg dbg(debugBuf);
+        this->log_ACTIVITY_LO_DebugLog(dbg);
+        keyLoaded = true;
+    }
+}
 
   // ----------------------------------------------------------------------
   // Encrypt
@@ -124,9 +117,22 @@ namespace Components {
     FwOpcodeType opCode,
     U32 cmdSeq,
     const Fw::CmdStringArg& data,
-    U8 person,      // New person parameter
-    U16 portnumber  // Existing port parameter
+    U8 person,
+    U16 portnumber
 ) {
+    // Load key on first call if not already loaded
+    if (!keyLoaded) {
+        loadSharedKey();
+    }
+
+    // Log shared key every time
+    std::vector<uint8_t> keyVec(this->sharedKey, this->sharedKey + CRYPTO_KEYBYTES);
+    std::string keyHex = this->bytesToHex(keyVec);
+    char debugBuf[128];
+    std::snprintf(debugBuf, sizeof(debugBuf), "Shared key in use: %s", keyHex.c_str());
+    Fw::LogStringArg dbg(debugBuf);
+    this->log_ACTIVITY_LO_DebugLog(dbg);
+    
     // 1) Convert ASCII input -> raw bytes    
     const char* plaintextStr = data.toChar();
     size_t plaintext_len = std::strlen(plaintextStr);
@@ -142,8 +148,8 @@ namespace Components {
         reinterpret_cast<const uint8_t*>(plaintextStr),
         reinterpret_cast<const uint8_t*>(plaintextStr) + plaintext_len
     );
-
-    // 2) Generate a random nonce
+/*
+    // 2) Generate a random nonce 
     U8* nonce = new U8[CRYPTO_NPUBBYTES];
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -151,6 +157,9 @@ namespace Components {
     for (size_t i = 0; i < CRYPTO_NPUBBYTES; ++i) {
         nonce[i] = static_cast<U8>(dis(gen));
     }
+*/
+    U8* nonce = new U8[CRYPTO_NPUBBYTES];
+    std::memset(nonce, 0, CRYPTO_NPUBBYTES); // Force nonce=all zero
 
     // 3) Prepare output buffer for ciphertext + auth tag
     std::vector<unsigned char> ciphertext(plaintext.size() + CRYPTO_ABYTES);
